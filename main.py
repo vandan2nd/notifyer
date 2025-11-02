@@ -5,8 +5,6 @@ import os
 from datetime import datetime
 from flask import Flask
 import threading
-import subprocess
-import sys
 
 # ====== CONFIG ======
 URL = os.getenv("RESULT_URL", "https://yourcollege.edu/results")
@@ -28,16 +26,6 @@ def health_check():
 def health():
     """Alternative health endpoint"""
     return {"status": "alive"}, 200
-
-def setup_playwright():
-    """Install Playwright browsers on first run"""
-    try:
-        print("📦 Installing Playwright browsers...")
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], 
-                      check=True, capture_output=True, timeout=300)
-        print("✅ Playwright browsers installed")
-    except Exception as e:
-        print(f"⚠️  Could not install Playwright: {e}")
 
 def send_telegram(msg):
     """Send a notification message to Telegram"""
@@ -79,28 +67,21 @@ def get_page_hash():
     try:
         print(f"🔍 Fetching page: {URL}")
         
-        # Try with Playwright for JavaScript rendering
-        try:
-            from playwright.sync_api import sync_playwright
-            print("   Using Playwright (JavaScript rendering)")
-            with sync_playwright() as p:
-                browser = p.chromium.launch()
-                page = browser.new_page()
-                page.goto(URL, wait_until="networkidle", timeout=20000)
-                content = page.content()
-                browser.close()
-        except Exception as e:
-            print(f"   ⚠️  Playwright failed: {e}, falling back to requests")
-            # Fallback to simple requests
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            response = requests.get(URL, headers=headers, timeout=20)
-            response.raise_for_status()
-            content = response.text
+        # Use requests with extended headers to maximize content capture
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
+        }
         
-        # Take only text to ignore ads/css/js noise
-        content = content.strip()
+        session = requests.Session()
+        response = session.get(URL, headers=headers, timeout=20, allow_redirects=True)
+        response.raise_for_status()
+        
+        # Get content and hash it
+        content = response.text.strip()
         page_hash = hashlib.sha256(content.encode()).hexdigest()
         print(f"   Page size: {len(content)} bytes")
         print(f"   Hash: {page_hash}")
@@ -164,9 +145,6 @@ def main():
             time.sleep(60)
 
 if __name__ == "__main__":
-    # Setup Playwright on first run
-    setup_playwright()
-    
     # Run Flask in a background thread
     flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False), daemon=True)
     flask_thread.start()
